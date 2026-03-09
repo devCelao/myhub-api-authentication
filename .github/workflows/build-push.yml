@@ -9,7 +9,7 @@ on:
         type: string
 
 env:
-  DOCKERHUB_IMAGE: api-catalogo
+  DOCKERHUB_IMAGE: api-authentication
 
 jobs:
   # ════════════════════════════════════════════════════════════════════════
@@ -42,7 +42,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
-          path: myhub-api-catalog
+          path: myhub-api-authentication
 
       - name: Checkout dos componentes compartilhados
         uses: actions/checkout@v4
@@ -63,7 +63,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: myhub-api-catalog/CatalogAPI/Dockerfile
+          file: myhub-api-authentication/AuthenticationAPI/Dockerfile
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:${{ inputs.tag }}
