@@ -1,0 +1,88 @@
+name: "Build & Push Docker Image"
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag existente no repositório (ex: v1.2.0)"
+        required: true
+        type: string
+
+env:
+  DOCKERHUB_IMAGE: api-catalogo
+
+jobs:
+  # ════════════════════════════════════════════════════════════════════════
+  # JOB 1 — Validar tag
+  # ════════════════════════════════════════════════════════════════════════
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verificar se a tag existe
+        run: |
+          if ! git rev-parse "refs/tags/${{ inputs.tag }}" >/dev/null 2>&1; then
+            echo "❌ Tag '${{ inputs.tag }}' não existe no repositório."
+            exit 1
+          fi
+          echo "✅ Tag '${{ inputs.tag }}' encontrada."
+
+  # ════════════════════════════════════════════════════════════════════════
+  # JOB 2 — Build e Push para Docker Hub
+  # ════════════════════════════════════════════════════════════════════════
+  build-push:
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout do repositório na tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          path: myhub-api-catalog
+
+      - name: Checkout dos componentes compartilhados
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/myhub-api-all-components
+          path: myhub-api-all-components
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login no Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build e Push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: myhub-api-catalog/CatalogAPI/Dockerfile
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:${{ inputs.tag }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:buildcache
+          cache-to: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:buildcache,mode=max
+
+      - name: Resumo
+        run: |
+          echo "══════════════════════════════════════════════════════"
+          echo "  ✅ Imagem publicada no Docker Hub"
+          echo "══════════════════════════════════════════════════════"
+          echo "  📦 ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:${{ inputs.tag }}"
+          echo "  📦 ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:latest"
+          echo "══════════════════════════════════════════════════════"
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECRETS NECESSÁRIAS (Settings → Secrets → Actions)
+# ═══════════════════════════════════════════════════════════════════════════
+# DOCKERHUB_USERNAME  — Usuário Docker Hub
+# DOCKERHUB_TOKEN     — Token Docker Hub
+# ═══════════════════════════════════════════════════════════════════════════

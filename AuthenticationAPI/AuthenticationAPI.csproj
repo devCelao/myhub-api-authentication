@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>e02829b6-d9c7-4b36-9829-2f951a5d6237</UserSecretsId>
+    <DockerDefaultTargetOS>Linux</DockerDefaultTargetOS>
+    <DockerfileContext>..\..\..\..</DockerfileContext>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.9" />
+    <PackageReference Include="Microsoft.VisualStudio.Azure.Containers.Tools.Targets" Version="1.22.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\myhub-api-all-components\MessageBus\MessageBus.csproj" />
+    <ProjectReference Include="..\..\myhub-api-all-components\MicroserviceCore\MicroserviceCore.csproj" />
+    <ProjectReference Include="..\AuthenticationApplication\AuthenticationApplication.csproj" />
+  </ItemGroup>
+
+</Project>

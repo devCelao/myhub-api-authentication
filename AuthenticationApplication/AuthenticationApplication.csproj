@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BCrypt.Net-Next" Version="4.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\myhub-api-all-components\IntegrationHandlers\IntegrationHandlers.csproj" />
+    <ProjectReference Include="..\..\myhub-api-all-components\MicroserviceCore\MicroserviceCore.csproj" />
+    <ProjectReference Include="..\AuthenticationInfrastructure\AuthenticationInfrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
