@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 
 namespace AuthenticationAPI.Controllers;
-[Route("Autenticacao")]
+[Route("api/authentication")]
 public class AuthenticacaoController(IAuthenticationService authService) : RootController
 {
     private readonly IAuthenticationService _authService = authService;

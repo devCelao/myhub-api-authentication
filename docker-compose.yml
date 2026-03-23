@@ -17,9 +17,9 @@ services:
     container_name: api-authentication
     restart: unless-stopped
     env_file:
-      - .env
+      - ../.env
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_ENVIRONMENT=${ENVIRONMENT:-Production}
       - Connection__ConnectionString=Server=mysql;Port=3306;Database=${MYSQL_DATABASE};User=${MYSQL_USER};Password=${MYSQL_PASSWORD}
       - Connection__Schema=${DB_SCHEMA:-SaaS}
       - MessageQueueConnection__MessageBus=host=rabbitmq;port=5672;username=${RABBITMQ_USER};password=${RABBITMQ_PASSWORD}
