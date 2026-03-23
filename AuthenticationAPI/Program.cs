@@ -24,15 +24,15 @@ builder.Services.AddContextCustomConfiguration<AcessoContext>(builder.Configurat
 // Add os controllers
 builder.Services.AddExtensionConfiguration();
 
-// Add configura��es do cors
+// Add configurações do cors
 builder.Services.AddCustomCors();
 
-// Add configura��es do swagger
+// Add configurações do swagger
 var infoApi = new OpenApiInfo
 {
     Version = "v1",
     Title = "Authentication API",
-    Description = "API de autentica��o e autoriza��o",
+    Description = "API de autenticação e autorização",
     Contact = new()
     {
         Name = "",
@@ -48,16 +48,16 @@ var infoApi = new OpenApiInfo
 
 builder.Services.AddSwaggerConfiguration(infoApi);
 
-// ========== Autentica��o JWT com JWKS (API Provider) ==========
+// ========== Autenticação JWT com JWKS (API Provider) ==========
 
-// Registrar DatabaseJwksStore (espec�fico desta API)
+// Registrar DatabaseJwksStore (específico desta API)
 builder.Services.AddScoped<IDatabaseJwksStore, DatabaseJwksStore>();
 
-// Registrar IssuerService (para issuer din�mico baseado no subdom�nio)
+// Registrar IssuerService (para issuer dinâmico baseado no subdomínio)
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IIssuerService, IssuerService>();
 
-// Configurar JWT Provider (gera tokens com issuer din�mico)
+// Configurar JWT Provider (gera tokens com issuer dinâmico)
 builder.Services.AddJwtAuthenticationProvider(builder.Configuration);
 
 // ========== Services ==========

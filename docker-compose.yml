@@ -17,7 +17,7 @@ services:
     container_name: api-authentication
     restart: unless-stopped
     env_file:
-      - ../.env
+      - .env
     environment:
       - ASPNETCORE_ENVIRONMENT=${ENVIRONMENT:-Production}
       - Connection__ConnectionString=Server=mysql;Port=3306;Database=${MYSQL_DATABASE};User=${MYSQL_USER};Password=${MYSQL_PASSWORD}
