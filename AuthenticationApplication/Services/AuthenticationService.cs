@@ -1,48 +1,49 @@
-﻿using AuthenticationDomain.Entities;
+﻿using AuthenticationDomain.Dtos;
+using AuthenticationDomain.Entities;
 using AuthenticationInfrastructure.Repositories;
 using DomainObjects.Enums;
+using MicroserviceCore.Extensions;
 using MicroserviceCore.Respostas;
-using MicroserviceCore.Services;
+using Microsoft.Extensions.Options;
 using System.Text.RegularExpressions;
 
 namespace AuthenticationApplication.Services;
+
 public interface IAuthenticationService
 {
-    // Criação de Acesso (após confirmação de email)
-    Task<RespostaProcessamento> CriarAcessoUsuario(Guid idUsuario, string email, string senha);
-    Task<RespostaProcessamento> DesbloquearContaAdmin(string email);
+    Task<ServiceResult> CriarAcessoUsuario(Guid idUsuario, string email, string senha);
+    Task<ServiceResult<DesbloqueioResponse>> DesbloquearContaAdmin(string email);
 
-    // Reset de Senha
-    Task<RespostaProcessamento> IniciarResetSenha(string email, string ipOrigem, string? userAgent = null);
-    Task<RespostaProcessamento> ValidarCodigoResetSenha(string codigo, string email);
-    Task<RespostaProcessamento> FinalizarResetSenha(string codigo, string email, string novaSenha, string ipOrigem);
+    Task<ServiceResult> IniciarResetSenha(string email, string ipOrigem, string? userAgent = null);
+    Task<ServiceResult> ValidarCodigoResetSenha(string codigo, string email);
+    Task<ServiceResult> FinalizarResetSenha(string codigo, string email, string novaSenha, string ipOrigem);
 
-    // Autenticação
-    Task<RespostaProcessamento> RealizarLogin(string email, string senha, string? ipOrigem = null, string? deviceInfo = null, string? userAgent = null);
-    Task<RespostaProcessamento> RenovarAccessToken(string refreshToken, string? issuer = null);
+    Task<ServiceResult<TokenResponse>> RealizarLogin(string email, string senha, string? ipOrigem = null, string? deviceInfo = null, string? userAgent = null);
+    Task<ServiceResult<TokenResponse>> RenovarAccessToken(string refreshToken, string? issuer = null);
+
+    ServiceResult<TokenResponse> RealizarLoginRoot(string email, string senha);
 }
-public class AuthenticationService(IAuthenticationRepository repository, ITokenService tokenService, IEmailService email) : BaseContextService, IAuthenticationService
+
+public class AuthenticationService(
+    IAuthenticationRepository repository,
+    ITokenService tokenService,
+    IEmailService email,
+    IOptions<AppSettings> appSettings) : IAuthenticationService
 {
     private readonly IAuthenticationRepository _repository = repository;
     private readonly ITokenService _tokenService = tokenService;
     private readonly IEmailService _emailService = email;
-    public async Task<RespostaProcessamento> CriarAcessoUsuario(Guid idUsuario, string email, string senha)
+    private readonly AppSettings _appSettings = appSettings.Value;
+
+    public async Task<ServiceResult> CriarAcessoUsuario(Guid idUsuario, string email, string senha)
     {
-        // Verificar se já existe acesso para este usuário
         var acessoExistente = await _repository.ObterUsuarioPorId(idUsuario);
         if (acessoExistente is not null)
-        {
-            AddErroProcessamento("Já existe um acesso criado para este usuário.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Ja existe um acesso criado para este usuario.");
 
-        // Verificar se email já está em uso
         var emailEmUso = await _repository.ObterUsuarioPorEmail(email);
         if (emailEmUso is not null)
-        {
-            AddErroProcessamento("Este email já está em uso.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Este email ja esta em uso.");
 
         string senhaCrypto = CriptografarSenha(senha);
 
@@ -50,41 +51,27 @@ public class AuthenticationService(IAuthenticationRepository repository, ITokenS
         _repository.AdicionaUsuario(novoAcesso);
 
         if (!await _repository.UnitOfWork.Commit())
-        {
-            AddErroProcessamento("Erro ao criar acesso do usuário.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Erro ao criar acesso do usuario.");
 
-        AdicionaRetorno(new
-        {
-            novoAcesso.IdUsuario,
-            novoAcesso.Email
-        });
-
-        return RetornaProcessamento();
+        return ServiceResult.Success("Acesso criado com sucesso. Voce ja pode fazer login com seu email e senha.");
     }
-    public async Task<RespostaProcessamento> RealizarLogin(string email, string senha, string? ipOrigem = null, string? deviceInfo = null, string? userAgent = null)
+
+    public async Task<ServiceResult<TokenResponse>> RealizarLogin(string email, string senha, string? ipOrigem = null, string? deviceInfo = null, string? userAgent = null)
     {
         var usuario = await _repository.ObterUsuarioPorEmail(email);
         if (usuario is null)
-        {
-            AddErroProcessamento("Email ou senha inválidos.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult<TokenResponse>.Failure("Email ou senha invalidos.");
 
-        // Verificar se pode fazer login
         if (!usuario.PodeFazerLogin())
         {
             if (usuario.TipoBloqueio == TipoBloqueio.ManualPermanente)
-                AddErroProcessamento("Conta bloqueada permanentemente. Entre em contato com o suporte.");
+                return ServiceResult<TokenResponse>.Failure("Conta bloqueada permanentemente. Entre em contato com o suporte.");
             else if (usuario.TipoBloqueio == TipoBloqueio.SuspeitaFraude)
-                AddErroProcessamento("Conta bloqueada por suspeita de fraude. Entre em contato com o suporte.");
+                return ServiceResult<TokenResponse>.Failure("Conta bloqueada por suspeita de fraude. Entre em contato com o suporte.");
             else if (usuario.DataFimBloqueio.HasValue)
-                AddErroProcessamento($"Conta bloqueada temporariamente até {usuario.DataFimBloqueio.Value:dd/MM/yyyy HH:mm}.");
+                return ServiceResult<TokenResponse>.Failure($"Conta bloqueada temporariamente ate {usuario.DataFimBloqueio.Value:dd/MM/yyyy HH:mm}.");
             else
-                AddErroProcessamento("Conta inativa. Entre em contato com o suporte.");
-
-            return RetornaProcessamento();
+                return ServiceResult<TokenResponse>.Failure("Conta inativa. Entre em contato com o suporte.");
         }
 
         if (!VerificarSenha(senha, usuario.SenhaCrypto))
@@ -93,372 +80,251 @@ public class AuthenticationService(IAuthenticationRepository repository, ITokenS
             _repository.AtualizarUsuario(usuario);
             await _repository.UnitOfWork.Commit();
 
-            AddErroProcessamento("Email ou senha inválidos.");
-            return RetornaProcessamento();
+            return ServiceResult<TokenResponse>.Failure("Email ou senha invalidos.");
         }
 
-        // Login bem-sucedido
         usuario.RegistrarLoginSucesso(ipOrigem);
         _repository.AtualizarUsuario(usuario);
 
-        // Busca os dados do Usuario via RPC
-
-        // Gerar tokens JWT usando TokenService
         var (accessToken, refreshToken) = await GerarTokensAutenticacao(usuario, deviceInfo, ipOrigem, userAgent);
 
         _repository.AdicionarRefreshToken(refreshToken);
 
         if (!await _repository.UnitOfWork.Commit())
-        {
-            AddErroProcessamento("Erro ao realizar login.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult<TokenResponse>.Failure("Erro ao realizar login.");
 
-        AdicionarRetornoTokens(accessToken, refreshToken.Token);
-
-        return RetornaProcessamento();
+        return ServiceResult<TokenResponse>.Success(CriarTokenResponse(accessToken, refreshToken.Token));
     }
-    public async Task<RespostaProcessamento> DesbloquearContaAdmin(string email)
+
+    public async Task<ServiceResult<DesbloqueioResponse>> DesbloquearContaAdmin(string email)
     {
         var usuario = await _repository.ObterUsuarioPorEmail(email);
         if (usuario is null)
-        {
-            AddErroProcessamento("Email ou senha inválidos.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult<DesbloqueioResponse>.NotFound("Usuario nao encontrado.");
 
         usuario.DesbloquearConta();
         _repository.AtualizarUsuario(usuario);
+
         if (!await _repository.UnitOfWork.Commit())
+            return ServiceResult<DesbloqueioResponse>.Failure("Erro ao desbloquear conta.");
+
+        var response = new DesbloqueioResponse
         {
-            AddErroProcessamento("Erro ao desbloquear conta.");
-            return RetornaProcessamento();
-        }
-        AdicionaRetorno(new
-        {
-            usuario.IdUsuario,
-            usuario.Email,
+            IdUsuario = usuario.IdUsuario,
+            Email = usuario.Email,
             Status = "Conta desbloqueada com sucesso."
-        });
-        return RetornaProcessamento();
+        };
+
+        return ServiceResult<DesbloqueioResponse>.Success(response, "Conta desbloqueada com sucesso.");
     }
-    public async Task<RespostaProcessamento> IniciarResetSenha(string email, string ipOrigem, string? userAgent = null)
+
+    public async Task<ServiceResult> IniciarResetSenha(string email, string ipOrigem, string? userAgent = null)
     {
         var usuario = await _repository.ObterUsuarioPorEmail(email);
-        
-        // Por segurança, sempre retornar sucesso mesmo se o email não existir
-        // Isso evita que atacantes descubram emails válidos no sistema
+
         if (usuario is null)
-        {
-            AdicionaRetorno(new
-            {
-                Mensagem = "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha."
-            });
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Success("Se o email estiver cadastrado, voce recebera instrucoes para redefinir sua senha.");
 
-        // Verificar se a conta está ativa
         if (!usuario.IndAtivo)
-        {
-            AdicionaRetorno(new
-            {
-                Mensagem = "Se o email estiver cadastrado, você receberá instruções para redefinir sua senha."
-            });
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Success("Se o email estiver cadastrado, voce recebera instrucoes para redefinir sua senha.");
 
-        // Verificar limite de solicitações (proteção contra abuso)
-        const int limiteMinutos = 60; // 1 hora
+        const int limiteMinutos = 60;
         const int maxSolicitacoes = 3;
         var solicitacoesRecentes = await _repository.ContarTokensRedefinicaoSenhaRecentes(usuario.IdUsuario, limiteMinutos);
-        
+
         if (solicitacoesRecentes >= maxSolicitacoes)
-        {
-            AddErroProcessamento($"Limite de solicitações atingido. Tente novamente em {limiteMinutos} minutos.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure($"Limite de solicitacoes atingido. Tente novamente em {limiteMinutos} minutos.");
 
-        // Inativar códigos anteriores do usuário
-        await _repository.InativarTokensRedefinicaoSenhaUsuario(usuario.IdUsuario, "Novo código solicitado");
+        await _repository.InativarTokensRedefinicaoSenhaUsuario(usuario.IdUsuario, "Novo codigo solicitado");
 
-        // Gerar código numérico de 6 dígitos
         var codigoNumerico = TokenRedefinicaoSenha.GerarCodigoNumerico();
         var tokenRedefinicao = new TokenRedefinicaoSenha(
             usuario.IdUsuario,
             usuario.Email,
             codigoNumerico,
             ipOrigem,
-            codigoNumerico
+            userAgent
         );
 
         _repository.AdicionarTokenRedefinicaoSenha(tokenRedefinicao);
 
         if (!await _repository.UnitOfWork.Commit())
-        {
-            AddErroProcessamento("Erro ao processar solicitação de reset de senha.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Erro ao processar solicitacao de reset de senha.");
 
-         await _emailService.EnviarEmailResetSenha(usuario.Email, codigoNumerico);
+        await _emailService.EnviarEmailResetSenha(usuario.Email, codigoNumerico);
 
-        AdicionaRetorno(new
-        {
-            Mensagem = "Se o email estiver cadastrado, você receberá um código de verificação para redefinir sua senha."
-        });
-
-        return RetornaProcessamento();
+        return ServiceResult.Success("Se o email estiver cadastrado, voce recebera instrucoes para redefinir sua senha.");
     }
 
-    public async Task<RespostaProcessamento> ValidarCodigoResetSenha(string codigo, string email)
+    public async Task<ServiceResult> ValidarCodigoResetSenha(string codigo, string email)
     {
-        // Validações básicas
         if (string.IsNullOrWhiteSpace(codigo) || string.IsNullOrWhiteSpace(email))
-        {
-            AddErroProcessamento("Código ou email inválido.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Codigo ou email invalido.");
 
-        // Validar formato do código (6 dígitos)
         if (!Regex.IsMatch(codigo, @"^\d{6}$"))
-        {
-            AddErroProcessamento("Código deve conter 6 dígitos.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Codigo deve conter 6 digitos.");
 
-        // Gerar hash do código para buscar
         var codigoHash = _tokenService.GerarHashToken(codigo);
         var tokenRedefinicao = await _repository.ObterTokenRedefinicaoSenhaPorHash(codigoHash);
 
         if (tokenRedefinicao is null)
-        {
-            AddErroProcessamento("Código inválido ou expirado.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Codigo invalido ou expirado.");
 
-        // Validar email
         if (!tokenRedefinicao.Email.Equals(email, StringComparison.OrdinalIgnoreCase))
-        {
-            AddErroProcessamento("Código inválido.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Codigo invalido.");
 
-        // Validar código
         if (!tokenRedefinicao.ValidarCodigo(codigo))
         {
             _repository.AtualizarTokenRedefinicaoSenha(tokenRedefinicao);
             await _repository.UnitOfWork.Commit();
 
-            if (tokenRedefinicao.TentativasInvalidas >= 5)
-            {
-                AddErroProcessamento("Código bloqueado por excesso de tentativas inválidas.");
-            }
-            else
-            {
-                AddErroProcessamento("Código inválido ou expirado.");
-            }
-            
-            return RetornaProcessamento();
+            return tokenRedefinicao.TentativasInvalidas >= 5
+                ? ServiceResult.Failure("Codigo bloqueado por excesso de tentativas invalidas.")
+                : ServiceResult.Failure("Codigo invalido ou expirado.");
         }
 
-        AdicionaRetorno(new
-        {
-            Mensagem = "Código validado com sucesso. Você pode definir sua nova senha.",
-            CodigoValido = true
-        });
-
-        return RetornaProcessamento();
+        return ServiceResult.Success("Codigo validado com sucesso. Voce pode definir sua nova senha.");
     }
 
-    public async Task<RespostaProcessamento> FinalizarResetSenha(string codigo, string email, string novaSenha, string ipOrigem)
+    public async Task<ServiceResult> FinalizarResetSenha(string codigo, string email, string novaSenha, string ipOrigem)
     {
-        // Validações básicas
         if (string.IsNullOrWhiteSpace(codigo) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(novaSenha))
-        {
-            AddErroProcessamento("Dados inválidos para reset de senha.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Dados invalidos para reset de senha.");
 
-        // Validar formato do código (6 dígitos)
         if (!Regex.IsMatch(codigo, @"^\d{6}$"))
-        {
-            AddErroProcessamento("Código deve conter 6 dígitos.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Codigo deve conter 6 digitos.");
 
-        // Validar força da senha
         if (novaSenha.Length < 8)
-        {
-            AddErroProcessamento("A senha deve ter no mínimo 8 caracteres.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("A senha deve ter no minimo 8 caracteres.");
 
-        // Gerar hash do código para buscar
         var codigoHash = _tokenService.GerarHashToken(codigo);
         var tokenRedefinicao = await _repository.ObterTokenRedefinicaoSenhaPorHash(codigoHash);
 
         if (tokenRedefinicao is null)
-        {
-            AddErroProcessamento("Código inválido ou expirado.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Codigo invalido ou expirado.");
 
-        // Validar email (segurança adicional)
         if (!tokenRedefinicao.Email.Equals(email, StringComparison.OrdinalIgnoreCase))
-        {
-            AddErroProcessamento("Código inválido.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Codigo invalido.");
 
-        // Validar código
         if (!tokenRedefinicao.ValidarCodigo(codigo))
         {
             _repository.AtualizarTokenRedefinicaoSenha(tokenRedefinicao);
             await _repository.UnitOfWork.Commit();
 
-            if (tokenRedefinicao.TentativasInvalidas >= 5)
-            {
-                AddErroProcessamento("Código bloqueado por excesso de tentativas inválidas.");
-            }
-            else
-            {
-                AddErroProcessamento("Código inválido ou expirado.");
-            }
-            
-            return RetornaProcessamento();
+            return tokenRedefinicao.TentativasInvalidas >= 5
+                ? ServiceResult.Failure("Codigo bloqueado por excesso de tentativas invalidas.")
+                : ServiceResult.Failure("Codigo invalido ou expirado.");
         }
 
         var usuario = tokenRedefinicao.Usuario;
         if (usuario is null)
-        {
-            AddErroProcessamento("Usuário não encontrado.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.NotFound("Usuario nao encontrado.");
 
-        // Verificar se a nova senha é diferente da atual
         if (VerificarSenha(novaSenha, usuario.SenhaCrypto))
-        {
-            AddErroProcessamento("A nova senha deve ser diferente da senha atual.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("A nova senha deve ser diferente da senha atual.");
 
-        // Atualizar senha
         usuario.SenhaCrypto = CriptografarSenha(novaSenha);
         usuario.DataUltimaTrocaSenha = DateTime.UtcNow;
-        usuario.VersaoSenha++; // Incrementar versão para invalidar refresh tokens antigos
+        usuario.VersaoSenha++;
         usuario.IndTrocaSenha = false;
 
-        // Marcar token como utilizado
         tokenRedefinicao.MarcarComoUtilizado(ipOrigem);
 
-        // Revogar todos os refresh tokens do usuário por segurança
         await _repository.RevogarRefreshTokensUsuario(usuario.IdUsuario, "Senha redefinida");
 
         _repository.AtualizarUsuario(usuario);
         _repository.AtualizarTokenRedefinicaoSenha(tokenRedefinicao);
 
         if (!await _repository.UnitOfWork.Commit())
-        {
-            AddErroProcessamento("Erro ao resetar a senha.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult.Failure("Erro ao resetar a senha.");
 
-        // Verificar se o IP de utilização é diferente do IP de solicitação
         if (tokenRedefinicao.IpUtilizacaoDiferente())
         {
-            // TODO: Enviar alerta de segurança por email
-            // await _emailService.EnviarAlertaSeguranca(usuario.Email, "Senha alterada de IP diferente");
+            await _emailService.EnviarEmailAlertaSeguranca(usuario.Email);
         }
 
         await _emailService.EnviarEmailConformacaoAlteracao(usuario.Email);
 
-        AdicionaRetorno(new
-        {
-            Mensagem = "Senha redefinida com sucesso. Você pode fazer login com a nova senha."
-        });
-
-        return RetornaProcessamento();
+        return ServiceResult.Success("Senha redefinida com sucesso. Voce pode fazer login com a nova senha.");
     }
-    public async Task<RespostaProcessamento> RenovarAccessToken(string refreshToken, string? issuer = null)
-    {
-        // Gerar hash do token para buscar usando TokenService
-        var hash = _tokenService.GerarHashToken(refreshToken);
 
+    public async Task<ServiceResult<TokenResponse>> RenovarAccessToken(string refreshToken, string? issuer = null)
+    {
+        var hash = _tokenService.GerarHashToken(refreshToken);
         var token = await _repository.ObterRefreshTokenPorHash(hash);
 
         if (token is null)
-        {
-            AddErroProcessamento("Refresh token inválido.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult<TokenResponse>.Failure("Refresh token invalido.");
 
-        // Detectar tentativa de reuso (possível ataque)
         if (token.IndUtilizado)
         {
-            // Revogar todos os tokens do usuário por segurança
             await _repository.RevogarRefreshTokensUsuario(token.IdUsuario, "Tentativa de reuso de refresh token detectada");
-            AddErroProcessamento("Refresh token já utilizado. Todas as sessões foram revogadas por segurança.");
-            return RetornaProcessamento();
+            return ServiceResult<TokenResponse>.Failure("Refresh token ja utilizado. Todas as sessoes foram revogadas por seguranca.");
         }
 
         if (!token.EstaValido())
         {
             if (token.IndRevogado)
-                AddErroProcessamento("Refresh token revogado.");
+                return ServiceResult<TokenResponse>.Failure("Refresh token revogado.");
             else if (token.DataExpiracao < DateTime.UtcNow)
-                AddErroProcessamento("Refresh token expirado.");
+                return ServiceResult<TokenResponse>.Failure("Refresh token expirado.");
             else
-                AddErroProcessamento("Refresh token inválido.");
-
-            return RetornaProcessamento();
+                return ServiceResult<TokenResponse>.Failure("Refresh token invalido.");
         }
 
-        // Validar versão da senha
         if (!token.VersaoSenhaValida(token.Usuario!.VersaoSenha))
         {
-            token.Revogar("Senha do usuário foi alterada");
+            token.Revogar("Senha do usuario foi alterada");
             _repository.AtualizarRefreshToken(token);
             await _repository.UnitOfWork.Commit();
-            AddErroProcessamento("Refresh token inválido. Senha foi alterada.");
-            return RetornaProcessamento();
+            return ServiceResult<TokenResponse>.Failure("Refresh token invalido. Senha foi alterada.");
         }
 
-        // Gerar novo refresh token (rotação) usando TokenService
-        // Passa o issuer recebido para manter consistência com o token original
         var (novoAccessToken, novoRefreshToken) = await GerarTokensAutenticacao(
-            token.Usuario, 
-            token.DeviceInfo, 
-            token.IpOrigem, 
+            token.Usuario,
+            token.DeviceInfo,
+            token.IpOrigem,
             token.UserAgent,
             issuer
         );
 
-        // Marcar token antigo como utilizado
         token.MarcarComoUtilizado(novoRefreshToken.IdRefreshToken);
-
         _repository.AtualizarRefreshToken(token);
-
         _repository.AdicionarRefreshToken(novoRefreshToken);
 
         if (!await _repository.UnitOfWork.Commit())
-        {
-            AddErroProcessamento("Erro ao renovar access token.");
-            return RetornaProcessamento();
-        }
+            return ServiceResult<TokenResponse>.Failure("Erro ao renovar access token.");
 
-        AdicionarRetornoTokens(novoAccessToken, novoRefreshToken.Token);
-
-        return RetornaProcessamento();
+        return ServiceResult<TokenResponse>.Success(CriarTokenResponse(novoAccessToken, novoRefreshToken.Token));
     }
+
+    public ServiceResult<TokenResponse> RealizarLoginRoot(string email, string senha)
+    {
+        if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(senha))
+            return ServiceResult<TokenResponse>.Failure("Credenciais invalidas.");
+
+        if (string.IsNullOrWhiteSpace(_appSettings.RootEmail) || string.IsNullOrWhiteSpace(_appSettings.RootPassword))
+            return ServiceResult<TokenResponse>.Failure("Credenciais invalidas.");
+
+        if (!_appSettings.RootEmail.Equals(email, StringComparison.OrdinalIgnoreCase) ||
+            !_appSettings.RootPassword.Equals(senha, StringComparison.Ordinal))
+            return ServiceResult<TokenResponse>.Failure("Credenciais invalidas.");
+
+        var accessToken = _tokenService.GerarAccessTokenRoot(email);
+        var refreshToken = _tokenService.GerarRefreshToken();
+
+        return ServiceResult<TokenResponse>.Success(CriarTokenResponse(accessToken, refreshToken));
+    }
+
     private async Task<(string accessToken, RefreshToken refreshToken)> GerarTokensAutenticacao(
-        AcessoUsuario usuario, 
-        string? deviceInfo = null, 
-        string? ipOrigem = null, 
+        AcessoUsuario usuario,
+        string? deviceInfo = null,
+        string? ipOrigem = null,
         string? userAgent = null,
         string? issuer = null)
     {
         var jwtId = _tokenService.GerarJwtId();
-        // Passa o issuer para o TokenService (se não fornecido, usa o padrão do IssuerService)
-        var accessToken = await _tokenService.GerarAccessToken(usuario, issuer: issuer);
+        var accessToken = await _tokenService.GerarAccessToken(usuario, issuer: issuer, jwtId: jwtId);
         var refreshTokenValue = _tokenService.GerarRefreshToken();
 
         var refreshToken = new RefreshToken(
@@ -474,30 +340,17 @@ public class AuthenticationService(IAuthenticationRepository repository, ITokenS
         return (accessToken, refreshToken);
     }
 
-    private void AdicionarRetornoTokens(string accessToken, string refreshToken)
+    private static TokenResponse CriarTokenResponse(string accessToken, string refreshToken) => new()
     {
-        AdicionaRetorno(new
-        {
-            AccessToken = accessToken,
-            RefreshToken = refreshToken,
-            ExpiresIn = 900, // 15 minutos para access token
-            RefreshExpiresIn = 2592000, // 30 dias para refresh token
-            //ExpiresIn = 900, // 15 minutos para access token
-            //RefreshExpiresIn = 2592000, // 30 dias para refresh token
-            TokenType = "Bearer"
-        });
-    }
+        AccessToken = accessToken,
+        RefreshToken = refreshToken,
+        ExpiresIn = 900,
+        RefreshExpiresIn = 2592000,
+        TokenType = "Bearer"
+    };
 
     private static bool VerificarSenha(string senha, string senhaCrypto)
-    {
-        if (string.IsNullOrWhiteSpace(senha) || string.IsNullOrWhiteSpace(senhaCrypto))
-            return false;
+        => !string.IsNullOrWhiteSpace(senha) && !string.IsNullOrWhiteSpace(senhaCrypto) && BCrypt.Net.BCrypt.Verify(senha, senhaCrypto);
 
-        return BCrypt.Net.BCrypt.Verify(senha, senhaCrypto);
-    }
-
-    private static string CriptografarSenha(string senha)
-    {
-        return BCrypt.Net.BCrypt.HashPassword(senha);
-    }
+    private static string CriptografarSenha(string senha) => BCrypt.Net.BCrypt.HashPassword(senha);
 }

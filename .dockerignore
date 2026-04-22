@@ -1,0 +1,15 @@
+**/bin/
+**/obj/
+**/.git/
+**/.github/
+**/.vs/
+**/.vscode/
+**/.cursor/
+**/AuthenticationTest/
+**/node_modules/
+**/*.md
+**/*.user
+**/*.sln.DotSettings
+**/docker-compose*.yml
+**/.dockerignore
+**/Dockerfile

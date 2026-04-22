@@ -1,8 +1,5 @@
-using EasyNetQ;
 using IntegrationHandlers.Events.EmailsWorker;
 using MessageBus.Interfaces;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 
 namespace AuthenticationApplication.Services;
 
@@ -13,6 +10,7 @@ public interface IEmailService
 {
     Task<bool> EnviarEmailResetSenha(string destinatario, string codigo, string? nomeUsuario = null);
     Task<bool> EnviarEmailConformacaoAlteracao(string destinatario);
+    Task<bool> EnviarEmailAlertaSeguranca(string destinatario);
 }
 
 /// <summary>
@@ -40,6 +38,16 @@ public class EmailService(IBusMessage bus) : IEmailService
     public async Task<bool> EnviarEmailConformacaoAlteracao(string destinatario)
     {
         var request = new EmailConfirmacaoAlteracaoSenhaEvent(assunto: "Alteração de senha", isHtml: true)
+        {
+            Email = destinatario
+        };
+
+        return await _bus.PublishAsync(message: request, topic: request.Topic);
+    }
+
+    public async Task<bool> EnviarEmailAlertaSeguranca(string destinatario)
+    {
+        var request = new EmailAlertaSegurancaEvent(assunto: "Alerta de Segurança", isHtml: true)
         {
             Email = destinatario
         };

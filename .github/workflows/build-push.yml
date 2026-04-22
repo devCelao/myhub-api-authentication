@@ -4,16 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag existente no repositório (ex: v1.2.0)"
+        description: "Tag existente no repositorio (ex: v1.2.0)"
         required: true
         type: string
 
 env:
   DOCKERHUB_IMAGE: api-authentication
+  DOTNET_VERSION: "9.0.x"
 
 jobs:
   # ════════════════════════════════════════════════════════════════════════
-  # JOB 1 — Validar tag
+  # JOB 1 - Validar tag
   # ════════════════════════════════════════════════════════════════════════
   validate:
     runs-on: ubuntu-latest
@@ -26,19 +27,52 @@ jobs:
       - name: Verificar se a tag existe
         run: |
           if ! git rev-parse "refs/tags/${{ inputs.tag }}" >/dev/null 2>&1; then
-            echo "❌ Tag '${{ inputs.tag }}' não existe no repositório."
+            echo "Tag '${{ inputs.tag }}' nao existe no repositorio."
             exit 1
           fi
-          echo "✅ Tag '${{ inputs.tag }}' encontrada."
+          echo "Tag '${{ inputs.tag }}' encontrada."
 
   # ════════════════════════════════════════════════════════════════════════
-  # JOB 2 — Build e Push para Docker Hub
+  # JOB 2 - Build e Testes
   # ════════════════════════════════════════════════════════════════════════
-  build-push:
+  build-test:
     runs-on: ubuntu-latest
     needs: validate
     steps:
-      - name: Checkout do repositório na tag
+      - name: Checkout do repositorio na tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+          path: myhub-api-authentication
+
+      - name: Checkout dos componentes compartilhados
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/myhub-api-all-components
+          path: myhub-api-all-components
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore myhub-api-authentication/api-authentication.sln
+
+      - name: Build
+        run: dotnet build myhub-api-authentication/api-authentication.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test myhub-api-authentication/AuthenticationTest/AuthenticationTest.csproj -c Release --no-build --verbosity normal
+
+  # ════════════════════════════════════════════════════════════════════════
+  # JOB 3 - Build e Push para Docker Hub
+  # ════════════════════════════════════════════════════════════════════════
+  build-push:
+    runs-on: ubuntu-latest
+    needs: build-test
+    steps:
+      - name: Checkout do repositorio na tag
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag }}
@@ -51,16 +85,16 @@ jobs:
           path: myhub-api-all-components
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login no Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build e Push
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: myhub-api-authentication/AuthenticationAPI/Dockerfile
@@ -73,16 +107,16 @@ jobs:
 
       - name: Resumo
         run: |
-          echo "══════════════════════════════════════════════════════"
-          echo "  ✅ Imagem publicada no Docker Hub"
-          echo "══════════════════════════════════════════════════════"
-          echo "  📦 ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:${{ inputs.tag }}"
-          echo "  📦 ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:latest"
-          echo "══════════════════════════════════════════════════════"
+          echo "======================================================"
+          echo "  Imagem publicada no Docker Hub"
+          echo "======================================================"
+          echo "  ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:${{ inputs.tag }}"
+          echo "  ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.DOCKERHUB_IMAGE }}:latest"
+          echo "======================================================"
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SECRETS NECESSÁRIAS (Settings → Secrets → Actions)
+# SECRETS NECESSARIAS (Settings > Secrets > Actions)
 # ═══════════════════════════════════════════════════════════════════════════
-# DOCKERHUB_USERNAME  — Usuário Docker Hub
-# DOCKERHUB_TOKEN     — Token Docker Hub
+# DOCKERHUB_USERNAME  - Usuario Docker Hub
+# DOCKERHUB_TOKEN     - Token Docker Hub
 # ═══════════════════════════════════════════════════════════════════════════

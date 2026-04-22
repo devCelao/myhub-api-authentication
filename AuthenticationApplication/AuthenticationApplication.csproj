@@ -13,6 +13,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\myhub-api-all-components\IntegrationHandlers\IntegrationHandlers.csproj" />
     <ProjectReference Include="..\..\myhub-api-all-components\MicroserviceCore\MicroserviceCore.csproj" />
+    <ProjectReference Include="..\AuthenticationDomain\AuthenticationDomain.csproj" />
     <ProjectReference Include="..\AuthenticationInfrastructure\AuthenticationInfrastructure.csproj" />
   </ItemGroup>
 

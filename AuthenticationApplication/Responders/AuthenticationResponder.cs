@@ -1,80 +1,71 @@
 using AuthenticationApplication.Services;
 using AuthenticationInfrastructure.Repositories;
+using IntegrationHandlers.Requests.Authetication;
 using MessageBus.Interfaces;
-using MessageBus.Messages.Authentication;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Microsoft.IdentityModel.Tokens;
 using SecurityCore.Services;
-using System.Text.Json;
 
 namespace AuthenticationApplication.Responders;
 
-/// <summary>
-/// Responder para mensagens de autenticação via MessageBus
-/// Processa: ValidateSession, RefreshToken, GetJwks
-/// </summary>
-public class AuthenticationResponder : BackgroundService
+public class AuthenticationResponder(
+    IBusMessage busMessage,
+    IServiceProvider serviceProvider,
+    ILogger<AuthenticationResponder> logger) : BackgroundService
 {
-    private readonly IBusMessage _busMessage;
-    private readonly IServiceProvider _provider;
-    private readonly ILogger<AuthenticationResponder> _logger;
-    
+    private readonly IBusMessage _busMessage = busMessage;
+    private readonly IServiceProvider _provider = serviceProvider;
+    private readonly ILogger<AuthenticationResponder> _logger = logger;
+
     private IDisposable? _validateSessionDisposable;
     private IDisposable? _refreshTokenDisposable;
     private IDisposable? _getJwksDisposable;
-
-    public AuthenticationResponder(
-        IBusMessage busMessage,
-        IServiceProvider serviceProvider,
-        ILogger<AuthenticationResponder> logger)
-    {
-        _busMessage = busMessage;
-        _provider = serviceProvider;
-        _logger = logger;
-    }
+    private IDisposable? _acessoDisposable;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("🔐 [AuthenticationResponder] Aguardando RabbitMQ estar pronto...");
+        _logger.LogInformation("[AuthenticationResponder] Aguardando RabbitMQ estar pronto...");
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
-        _logger.LogInformation("🔐 [AuthenticationResponder] Registrando responders...");
+        _logger.LogInformation("[AuthenticationResponder] Registrando responders...");
 
-        // Registrar responder para ValidateSession
         _validateSessionDisposable = await _busMessage.RespondAsync<ValidateSessionRequest, ValidateSessionResponse>(
             async (request) =>
             {
-                _logger.LogInformation("🔐 [ValidateSession] Validando sessão...");
+                _logger.LogInformation("[ValidateSession] Validando sessao...");
                 return await HandleValidateSession(request);
             });
 
-        // Registrar responder para RefreshToken
         _refreshTokenDisposable = await _busMessage.RespondAsync<RefreshTokenRequest, RefreshTokenResponse>(
             async (request) =>
             {
-                _logger.LogInformation("🔄 [RefreshToken] Renovando token...");
+                _logger.LogInformation("[RefreshToken] Renovando token...");
                 return await HandleRefreshToken(request);
             });
 
-        // Registrar responder para GetJwks
         _getJwksDisposable = await _busMessage.RespondAsync<GetJwksRequest, GetJwksResponse>(
             async (request) =>
             {
-                _logger.LogInformation("🔑 [GetJwks] Obtendo chaves JWKS...");
+                _logger.LogInformation("[GetJwks] Obtendo chaves JWKS...");
                 return await Task.FromResult(HandleGetJwks());
             });
 
-        _logger.LogInformation("✅ [AuthenticationResponder] Todos os responders registrados com sucesso!");
+        _acessoDisposable = await _busMessage.RespondAsync<AcessoRequest, AcessoResponse>(
+            async (request) =>
+            {
+                _logger.LogInformation("[Acesso] Processando acesso para usuario: {Email}", request.Email);
+                using var scope = _provider.CreateScope();
+                var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
+                var resultado = await authService.CriarAcessoUsuario(request.IdUsuario, request?.Email!, request?.Senha!);
+                return new AcessoResponse(resultado.Message, resultado.Errors);
+            });
 
-        // Manter o serviço vivo
+        _logger.LogInformation("[AuthenticationResponder] Todos os responders registrados com sucesso!");
+
         await Task.Delay(Timeout.Infinite, stoppingToken);
     }
 
-    /// <summary>
-    /// Valida se o refresh token ainda é válido (não revogado, não expirado)
-    /// </summary>
     private async Task<ValidateSessionResponse> HandleValidateSession(ValidateSessionRequest request)
     {
         try
@@ -85,54 +76,57 @@ public class AuthenticationResponder : BackgroundService
 
             if (string.IsNullOrEmpty(request.RefreshToken))
             {
-                _logger.LogWarning("🔐 [ValidateSession] RefreshToken vazio");
-                return ValidateSessionResponse.Invalid("RefreshToken não fornecido");
+                _logger.LogWarning("[ValidateSession] RefreshToken vazio");
+                return ValidateSessionResponse.Invalid("RefreshToken nao fornecido");
             }
 
-            // Gerar hash do token para buscar no banco
             var hash = tokenService.GerarHashToken(request.RefreshToken);
             var token = await repository.ObterRefreshTokenPorHash(hash);
 
             if (token is null)
             {
-                _logger.LogWarning("🔐 [ValidateSession] Token não encontrado no banco");
-                return ValidateSessionResponse.Invalid("Token não encontrado");
+                _logger.LogWarning("[ValidateSession] Token nao encontrado no banco");
+                return ValidateSessionResponse.Invalid("Token nao encontrado");
             }
 
             if (!token.EstaValido())
             {
                 if (token.IndRevogado)
                 {
-                    _logger.LogWarning("🔐 [ValidateSession] Token revogado: {Motivo}", token.MotivoRevogacao);
-                    return ValidateSessionResponse.Invalid($"Sessão revogada: {token.MotivoRevogacao}");
+                    _logger.LogWarning("[ValidateSession] Token revogado: {Motivo}", token.MotivoRevogacao);
+                    return ValidateSessionResponse.Invalid($"Sessao revogada: {token.MotivoRevogacao}");
                 }
                 if (token.IndUtilizado)
                 {
-                    _logger.LogWarning("🔐 [ValidateSession] Token já utilizado");
-                    return ValidateSessionResponse.Invalid("Token já utilizado");
+                    _logger.LogWarning("[ValidateSession] Token ja utilizado");
+                    return ValidateSessionResponse.Invalid("Token ja utilizado");
                 }
                 if (token.DataExpiracao < DateTime.UtcNow)
                 {
-                    _logger.LogWarning("🔐 [ValidateSession] Token expirado");
+                    _logger.LogWarning("[ValidateSession] Token expirado");
                     return ValidateSessionResponse.Invalid("Token expirado");
                 }
 
-                return ValidateSessionResponse.Invalid("Token inválido");
+                return ValidateSessionResponse.Invalid("Token invalido");
             }
 
-            _logger.LogInformation("✅ [ValidateSession] Sessão válida para usuário: {IdUsuario}", token.IdUsuario);
+            var usuario = await repository.ObterUsuarioPorId(token.IdUsuario);
+            if (usuario is not null && !token.VersaoSenhaValida(usuario.VersaoSenha))
+            {
+                _logger.LogWarning("[ValidateSession] VersaoSenha divergente para usuario: {IdUsuario}", token.IdUsuario);
+                return ValidateSessionResponse.Invalid("Senha foi alterada. Faca login novamente.");
+            }
+
+            _logger.LogInformation("[ValidateSession] Sessao valida para usuario: {IdUsuario}", token.IdUsuario);
             return ValidateSessionResponse.Valid();
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [ValidateSession] Erro ao validar sessão");
+            _logger.LogError(ex, "[ValidateSession] Erro ao validar sessao");
             return ValidateSessionResponse.Invalid($"Erro interno: {ex.Message}");
         }
     }
 
-    /// <summary>
-    /// Renova o access token usando o refresh token
-    /// </summary>
     private async Task<RefreshTokenResponse> HandleRefreshToken(RefreshTokenRequest request)
     {
         try
@@ -140,60 +134,29 @@ public class AuthenticationResponder : BackgroundService
             using var scope = _provider.CreateScope();
             var authService = scope.ServiceProvider.GetRequiredService<IAuthenticationService>();
 
-            _logger.LogInformation("🔄 [RefreshToken] Chamando RenovarAccessToken com issuer: {Issuer}", request.Issuer ?? "N/A");
+            _logger.LogInformation("[RefreshToken] Chamando RenovarAccessToken com issuer: {Issuer}", request.Issuer ?? "N/A");
             var resultado = await authService.RenovarAccessToken(request.RefreshToken, request.Issuer);
 
-            if (resultado.PossuiErros)
+            if (!resultado.IsSuccess || resultado.Data is null)
             {
-                _logger.LogWarning("🔄 [RefreshToken] Falha: {Erros}", string.Join(", ", resultado.Errors));
+                _logger.LogWarning("[RefreshToken] Falha: {Erros}", string.Join(", ", resultado.Errors));
                 return RefreshTokenResponse.Failed();
             }
 
-            // Verificar se ResultObject existe
-            if (resultado.ResultObject == null)
-            {
-                _logger.LogWarning("🔄 [RefreshToken] ResultObject é nulo!");
-                return RefreshTokenResponse.Failed();
-            }
-
-            // Extrair tokens do resultado
-            var resultJson = JsonSerializer.Serialize(resultado.ResultObject);
-            _logger.LogInformation("🔄 [RefreshToken] ResultObject JSON: {Json}", resultJson);
-            
-            var tokens = JsonSerializer.Deserialize<TokenData>(resultJson, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
-
-            _logger.LogInformation("🔄 [RefreshToken] Tokens deserializados - AccessToken: {HasAccess}, RefreshToken: {HasRefresh}", 
-                tokens?.AccessToken != null, 
-                tokens?.RefreshToken != null);
-
-            if (tokens?.AccessToken == null || tokens?.RefreshToken == null)
-            {
-                _logger.LogWarning("🔄 [RefreshToken] Tokens não encontrados no resultado. AccessToken: '{Access}', RefreshToken: '{Refresh}'",
-                    tokens?.AccessToken ?? "NULL",
-                    tokens?.RefreshToken ?? "NULL");
-                return RefreshTokenResponse.Failed();
-            }
-
-            _logger.LogInformation("✅ [RefreshToken] Tokens renovados com sucesso");
+            _logger.LogInformation("[RefreshToken] Tokens renovados com sucesso");
             return RefreshTokenResponse.Succeeded(
-                tokens.AccessToken, 
-                tokens.RefreshToken,
-                tokens.ExpiresIn,
-                tokens.RefreshExpiresIn);
+                resultado.Data.AccessToken,
+                resultado.Data.RefreshToken,
+                resultado.Data.ExpiresIn,
+                resultado.Data.RefreshExpiresIn);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [RefreshToken] Erro ao renovar token");
+            _logger.LogError(ex, "[RefreshToken] Erro ao renovar token");
             return RefreshTokenResponse.Failed();
         }
     }
 
-    /// <summary>
-    /// Obtém as chaves públicas JWKS
-    /// </summary>
     private GetJwksResponse HandleGetJwks()
     {
         try
@@ -202,20 +165,19 @@ public class AuthenticationResponder : BackgroundService
             var jwksService = scope.ServiceProvider.GetRequiredService<IJwksService>();
 
             var keys = jwksService.GetPublicKeys(5);
-            
-            // Serializar para formato JWKS padrão
-            var jwks = new { keys = keys };
-            var jwksJson = JsonSerializer.Serialize(jwks, new JsonSerializerOptions
+
+            var jwks = new { keys };
+            var jwksJson = System.Text.Json.JsonSerializer.Serialize(jwks, new System.Text.Json.JsonSerializerOptions
             {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
             });
 
-            _logger.LogInformation("✅ [GetJwks] Retornando {Count} chaves públicas", keys.Count);
+            _logger.LogInformation("[GetJwks] Retornando {Count} chaves publicas", keys.Count);
             return new GetJwksResponse(jwksJson);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "❌ [GetJwks] Erro ao obter chaves JWKS");
+            _logger.LogError(ex, "[GetJwks] Erro ao obter chaves JWKS");
             return new GetJwksResponse("{}");
         }
     }
@@ -225,17 +187,8 @@ public class AuthenticationResponder : BackgroundService
         _validateSessionDisposable?.Dispose();
         _refreshTokenDisposable?.Dispose();
         _getJwksDisposable?.Dispose();
+        _acessoDisposable?.Dispose();
         base.Dispose();
+        GC.SuppressFinalize(this);
     }
 }
-
-// DTO interno para deserialização
-// Nota: Usa PropertyNameCaseInsensitive na deserialização para funcionar com PascalCase ou camelCase
-internal class TokenData
-{
-    public string? AccessToken { get; set; }
-    public string? RefreshToken { get; set; }
-    public int ExpiresIn { get; set; } = 900;
-    public int RefreshExpiresIn { get; set; } = 2592000;
-}
-

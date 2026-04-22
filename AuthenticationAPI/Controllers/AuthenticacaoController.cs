@@ -1,39 +1,43 @@
 ﻿using AuthenticationApplication.Services;
+using AuthenticationDomain.Dtos;
 using MicroserviceCore.Controller;
 using MicroserviceCore.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 
 namespace AuthenticationAPI.Controllers;
+
 [Route("api/authentication")]
-public class AuthenticacaoController(IAuthenticationService authService) : RootController
+public class AuthenticacaoController(IAuthenticationService authService) : BaseController
 {
     private readonly IAuthenticationService _authService = authService;
-    // ========== Criação de Acesso ==========
 
-    /// <summary>
-    /// Cria o acesso (senha) para um usuário após confirmação de email
-    /// </summary>
+    [AllowAnonymous]
     [HttpPost("criar-acesso")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> CriarAcesso([FromBody] CriarAcessoRequest request)
     {
-        var resultado = await _authService.CriarAcessoUsuario(request.IdUsuario, request.Email, request.Senha);
+        if (!ModelState.IsValid) return ValidationError();
 
-        return CustomResponde(resultado);
+        var result = await _authService.CriarAcessoUsuario(request.IdUsuario, request.Email, request.Senha);
+        return ToActionResult(result);
     }
-    // ========== Autenticação ==========
 
-    /// <summary>
-    /// Realiza o login do usuário
-    /// </summary>
+    [AllowAnonymous]
     [HttpPost("login")]
+    [ProducesResponseType(typeof(TokenResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> Login([FromBody] LoginRequest request)
     {
+        if (!ModelState.IsValid) return ValidationError();
+
         var ipOrigem = ObterIpRequisicao;
         var userAgent = Request.Headers.UserAgent.ToString();
         var deviceInfo = ObterDeviceInfo();
 
-        var resultado = await _authService.RealizarLogin(
+        var result = await _authService.RealizarLogin(
             request.Email,
             request.Password,
             ipOrigem,
@@ -41,111 +45,121 @@ public class AuthenticacaoController(IAuthenticationService authService) : RootC
             userAgent
         );
 
-        if (!resultado.PossuiErros) SetCookies(resultado.ResultObject);
+        if (result.IsSuccess && result.Data is not null)
+            SetCookies(result.Data);
 
-        return CustomResponde(resultado);
+        return ToActionResult(result);
     }
-    /// <summary>
-    /// Renova o access token usando refresh token
-    /// </summary>
+
+    [Authorize]
     [HttpPost("refresh")]
+    [ProducesResponseType(typeof(TokenResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenRequest request)
     {
-        var resultado = await _authService.RenovarAccessToken(request.RefreshToken);
+        if (!ModelState.IsValid) return ValidationError();
 
-        if (!resultado.PossuiErros) SetCookies(resultado.ResultObject);
+        var result = await _authService.RenovarAccessToken(request.RefreshToken);
 
-        return CustomResponde(resultado);
+        if (result.IsSuccess && result.Data is not null)
+            SetCookies(result.Data);
+
+        return ToActionResult(result);
     }
 
-    private void SetCookies(object? ResultObject)
-    {
-        var tokens = JsonSerializer.Deserialize<TokenResponse>(
-                JsonSerializer.Serialize(ResultObject));
-        
-        if (tokens is not null)
-        {
-            AuthCookieManager.SetTokenCookies(
-                Response, 
-                tokens.AccessToken, 
-                tokens.RefreshToken
-            );
-        }
-    }
-
-    /// <summary>
-    /// Desbloqueia conta
-    /// </summary>
+    [Authorize]
     [HttpGet("desbloquear-conta/{email}")]
+    [ProducesResponseType(typeof(DesbloqueioResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> DesbloquearConta(string email)
     {
-        var resultado = await _authService.DesbloquearContaAdmin(email);
-        return CustomResponde(resultado);
+        var result = await _authService.DesbloquearContaAdmin(email);
+        return ToActionResult(result);
     }
 
-    /// <summary>
-    /// Envio de email para reset de senha
-    /// </summary>
+    [AllowAnonymous]
     [HttpPost("forgot-password/{email}")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ForgotPassword(string email)
     {
         var ipOrigem = ObterIpRequisicao;
         var userAgent = Request.Headers.UserAgent.ToString();
 
-        var resultado = await _authService.IniciarResetSenha(email, ipOrigem, userAgent);
-
-        return CustomResponde(resultado);
+        var result = await _authService.IniciarResetSenha(email, ipOrigem, userAgent);
+        return ToActionResult(result);
     }
 
-    /// <summary>
-    /// Valida código de verificação para reset de senha
-    /// </summary>
+    [AllowAnonymous]
     [HttpPost("validate-reset-code")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> ValidateResetCode([FromBody] ValidateCodeRequest request)
     {
-        var resultado = await _authService.ValidarCodigoResetSenha(request.Codigo, request.Email);
+        if (!ModelState.IsValid) return ValidationError();
 
-        return CustomResponde(resultado);
+        var result = await _authService.ValidarCodigoResetSenha(request.Codigo, request.Email);
+        return ToActionResult(result);
     }
 
-    /// <summary>
-    /// Reset de senha com código de verificação
-    /// </summary>
+    [AllowAnonymous]
     [HttpPost("reset-password")]
-    public async Task<IActionResult> ResetPassword([FromBody] ResetPassword reset)
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
     {
+        if (!ModelState.IsValid) return ValidationError();
+
         var ipOrigem = ObterIpRequisicao;
 
-        var resultado = await _authService.FinalizarResetSenha(
-            reset.Codigo, 
-            reset.Email, 
-            reset.NewPassword, 
+        var result = await _authService.FinalizarResetSenha(
+            request.Codigo,
+            request.Email,
+            request.NewPassword,
             ipOrigem
         );
 
-        return CustomResponde(resultado);
+        return ToActionResult(result);
     }
 
-    // ========== Métodos Auxiliares ==========
+    [AllowAnonymous]
+    [HttpPost("root-login")]
+    [ProducesResponseType(typeof(TokenResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public IActionResult RootLogin([FromBody] LoginRequest request)
+    {
+        if (!ModelState.IsValid) return ValidationError();
+
+        var result = _authService.RealizarLoginRoot(request.Email, request.Password);
+
+        if (result.IsSuccess && result.Data is not null)
+            SetCookies(result.Data);
+
+        return ToActionResult(result);
+    }
+
+    private void SetCookies(TokenResponse tokens)
+    {
+        AuthCookieManager.SetTokenCookies(
+            Response,
+            tokens.AccessToken,
+            tokens.RefreshToken
+        );
+    }
+
     private string ObterIpRequisicao
         => HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 
     private string ObterDeviceInfo()
     {
         var userAgent = Request.Headers.UserAgent.ToString();
-        // TODO: Implementar parsing de user agent para extrair device info
         return JsonSerializer.Serialize(new
         {
             UserAgent = userAgent,
-            Platform = "Web" // Pode ser extraído do user agent
+            Platform = "Web"
         });
     }
 }
-// ========== DTOs ==========
-
-public record CriarAcessoRequest(Guid IdUsuario, string Email, string Senha);
-public record LoginRequest(string Email, string Password);
-public record RefreshTokenRequest(string RefreshToken);
-public record ValidateCodeRequest(string Codigo, string Email);
-public record ResetPassword(string Codigo, string Email, string NewPassword);
-public record TokenResponse(string AccessToken, string RefreshToken, int ExpiresIn, int RefreshExpiresIn, string TokenType);
