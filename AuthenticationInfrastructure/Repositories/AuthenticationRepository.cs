@@ -2,8 +2,6 @@
 using AuthenticationInfrastructure.Context;
 using DomainObjects.Data;
 using Microsoft.EntityFrameworkCore;
-using Newtonsoft.Json.Linq;
-using Polly;
 
 namespace AuthenticationInfrastructure.Repositories;
 public interface IAuthenticationRepository

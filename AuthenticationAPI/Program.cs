@@ -7,11 +7,11 @@ using AuthenticationInfrastructure.Store;
 using FluentValidation;
 using FluentValidation.AspNetCore;
 using MicroserviceCore.Configuration;
-using MicroserviceCore.Extensions;
 using Microsoft.OpenApi.Models;
 using SecurityCore.Services;
 using SecurityCore.Store;
 using MessageBus.Configuration;
+using AuthenticationDomain.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 bool isDevelopment = builder.Environment.IsDevelopment();

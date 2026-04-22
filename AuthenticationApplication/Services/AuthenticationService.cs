@@ -1,8 +1,8 @@
 ﻿using AuthenticationDomain.Dtos;
 using AuthenticationDomain.Entities;
+using AuthenticationDomain.Extensions;
 using AuthenticationInfrastructure.Repositories;
 using DomainObjects.Enums;
-using MicroserviceCore.Extensions;
 using MicroserviceCore.Respostas;
 using Microsoft.Extensions.Options;
 using System.Text.RegularExpressions;
