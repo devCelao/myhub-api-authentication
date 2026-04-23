@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -40,19 +40,19 @@ jobs:
     needs: validate
     steps:
       - name: Checkout do repositorio na tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag }}
           path: myhub-api-authentication
 
       - name: Checkout dos componentes compartilhados
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository_owner }}/myhub-api-all-components
           path: myhub-api-all-components
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -73,13 +73,13 @@ jobs:
     needs: build-test
     steps:
       - name: Checkout do repositorio na tag
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ inputs.tag }}
           path: myhub-api-authentication
 
       - name: Checkout dos componentes compartilhados
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ github.repository_owner }}/myhub-api-all-components
           path: myhub-api-all-components
@@ -94,7 +94,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build e Push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: myhub-api-authentication/AuthenticationAPI/Dockerfile
