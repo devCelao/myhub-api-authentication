@@ -65,7 +65,7 @@ builder.Services.AddScoped<IAuthenticationRepository, AuthenticationRepository>(
 builder.Services.AddScoped<IAuthenticationService, AuthenticationService>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
-
+builder.Services.AddScoped<IJwksService, JwksService>();
 builder.Services.AddMessageBusResponder<AuthenticationResponder>(builder.Configuration);
 
 var app = builder.Build();
