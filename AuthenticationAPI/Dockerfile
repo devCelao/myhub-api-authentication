@@ -15,8 +15,7 @@ ARG BUILD_CONFIGURATION=Release
 WORKDIR /src
 
 # Copiar .csproj dos Componentes (repo myhub-api-all-components)
-COPY myhub-api-all-components/DomainCore/DomainObjects.csproj                myhub-api-all-components/DomainCore/
-COPY myhub-api-all-components/DataTransferObjects/DataTransferObjects.csproj myhub-api-all-components/DataTransferObjects/
+COPY myhub-api-all-components/DomainObjects/DomainObjects.csproj                myhub-api-all-components/DomainObjects/
 COPY myhub-api-all-components/MessageBus/MessageBus.csproj                   myhub-api-all-components/MessageBus/
 COPY myhub-api-all-components/SecurityCore/SecurityCore.csproj               myhub-api-all-components/SecurityCore/
 COPY myhub-api-all-components/MicroserviceCore/MicroserviceCore.csproj       myhub-api-all-components/MicroserviceCore/

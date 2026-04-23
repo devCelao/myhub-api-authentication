@@ -11,7 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\myhub-api-all-components\DomainCore\DomainObjects.csproj" />
+    <ProjectReference Include="..\..\myhub-api-all-components\DomainObjects\DomainObjects.csproj" />
   </ItemGroup>
 
 </Project>
